@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -13,8 +13,12 @@ import {
   Sparkles, 
   Terminal, 
   Zap,
-  Check,
-  ChevronRight
+  ChevronRight,
+  Package,
+  FolderArchive,
+  Save,
+  File,
+  Settings
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -29,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // --- Schema ---
 const formSchema = z.object({
@@ -38,14 +43,11 @@ const formSchema = z.object({
   description: z.string().optional(),
   author: z.string().optional(),
   mainClass: z.string().min(1, "Main class path is required"),
-  
-  // Features
   hasCommands: z.boolean().default(true),
   hasEvents: z.boolean().default(true),
   hasConfig: z.boolean().default(true),
-  hasPermissions: z.boolean().default(false),
-  
-  // AI Prompt
+  libraries: z.array(z.string()).default([]),
+  buildTool: z.enum(["maven", "gradle"]).default("maven"),
   aiPrompt: z.string().optional(),
 });
 
@@ -56,9 +58,24 @@ const SPIGOT_VERSIONS = [
   "1.20.4", "1.20.1", "1.19.4", "1.18.2", "1.17.1", "1.16.5", "1.12.2", "1.8.8"
 ];
 
+interface Library {
+  id: string;
+  name: string;
+}
+
 // --- Components ---
 
-function CodePreview({ code, language = "java" }: { code: string, language?: string }) {
+function CodeEditor({ 
+  code, 
+  onChange, 
+  filename,
+  language = "java" 
+}: { 
+  code: string; 
+  onChange: (code: string) => void;
+  filename: string;
+  language?: string;
+}) {
   return (
     <div className="relative group rounded-lg overflow-hidden border border-border bg-[#0d0d12]">
       <div className="flex items-center justify-between px-4 py-2 bg-[#1a1a22] border-b border-border">
@@ -68,25 +85,63 @@ function CodePreview({ code, language = "java" }: { code: string, language?: str
             <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50" />
             <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50" />
           </div>
-          <span className="text-xs text-muted-foreground font-mono ml-2">{language === 'yaml' ? 'plugin.yml' : 'Main.java'}</span>
+          <span className="text-xs text-muted-foreground font-mono ml-2">{filename}</span>
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground">
-          <Download className="h-3 w-3" />
-        </Button>
+        <Badge variant="outline" className="font-mono text-xs border-primary/30 text-primary uppercase">
+          {language}
+        </Badge>
       </div>
-      <ScrollArea className="h-[400px] w-full p-4">
-        <pre className="font-mono text-sm text-blue-100 leading-relaxed">
-          <code>{code}</code>
-        </pre>
-      </ScrollArea>
+      <textarea
+        value={code}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full h-[400px] bg-transparent text-blue-100 font-mono text-sm p-4 resize-none focus:outline-none focus:ring-0 border-0"
+        spellCheck={false}
+        data-testid={`editor-${filename.replace(/[^a-z0-9]/gi, '-')}`}
+      />
+    </div>
+  );
+}
+
+function FileTree({ files, activeFile, onSelect }: { 
+  files: Record<string, string>; 
+  activeFile: string;
+  onSelect: (path: string) => void;
+}) {
+  const paths = Object.keys(files);
+  
+  return (
+    <div className="bg-card/50 border border-border rounded-lg p-2 space-y-1">
+      <div className="text-xs font-semibold text-muted-foreground px-2 py-1 uppercase tracking-wide">Files</div>
+      {paths.map((path) => {
+        const filename = path.split('/').pop() || path;
+        const isActive = path === activeFile;
+        return (
+          <button
+            key={path}
+            onClick={() => onSelect(path)}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm transition-colors ${
+              isActive 
+                ? 'bg-primary/20 text-primary' 
+                : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+            }`}
+            data-testid={`file-${filename.replace(/[^a-z0-9]/gi, '-')}`}
+          >
+            <File className="w-4 h-4 shrink-0" />
+            <span className="truncate font-mono text-xs">{filename}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 export default function Home() {
-  const [generatedCode, setGeneratedCode] = useState<string>("");
+  const [generatedFiles, setGeneratedFiles] = useState<Record<string, string>>({});
+  const [activeFile, setActiveFile] = useState<string>("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState("builder");
+  const [libraries, setLibraries] = useState<Library[]>([]);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -94,18 +149,26 @@ export default function Home() {
       name: "MyAwesomePlugin",
       version: "1.0.0",
       apiVersion: "1.20.4",
-      description: "A generic Spigot plugin",
-      author: "Steve",
+      description: "A powerful Spigot plugin",
+      author: "Developer",
       mainClass: "com.example.myawesomeplugin.Main",
       hasCommands: true,
       hasEvents: true,
       hasConfig: true,
-      hasPermissions: false,
+      libraries: [],
+      buildTool: "maven",
       aiPrompt: "",
     },
   });
 
-  // Watch values for live preview updates
+  // Fetch available libraries
+  useEffect(() => {
+    fetch("/api/libraries")
+      .then(res => res.json())
+      .then(setLibraries)
+      .catch(console.error);
+  }, []);
+
   const values = form.watch();
 
   const generatePlugin = async (data: FormValues) => {
@@ -115,9 +178,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/generate-plugin", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
 
@@ -126,12 +187,56 @@ export default function Home() {
       }
 
       const result = await response.json();
-      setGeneratedCode(result.code);
+      setGeneratedFiles(result.files);
+      
+      // Set the first file as active
+      const firstFile = Object.keys(result.files)[0];
+      if (firstFile) setActiveFile(firstFile);
     } catch (error) {
       console.error("Generation error:", error);
-      setGeneratedCode(`// Error generating plugin: ${error instanceof Error ? error.message : 'Unknown error'}\n// Please check your OpenAI API key and try again.`);
+      setGeneratedFiles({
+        'error.txt': `Error generating plugin: ${error instanceof Error ? error.message : 'Unknown error'}\nPlease check your API key and try again.`
+      });
+      setActiveFile('error.txt');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleFileChange = (path: string, content: string) => {
+    setGeneratedFiles(prev => ({
+      ...prev,
+      [path]: content
+    }));
+  };
+
+  const downloadPlugin = async () => {
+    setIsDownloading(true);
+    try {
+      const response = await fetch("/api/download-plugin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          files: generatedFiles, 
+          pluginName: values.name 
+        }),
+      });
+
+      if (!response.ok) throw new Error("Download failed");
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${values.name}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error("Download error:", error);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -143,15 +248,18 @@ authors: [${values.author}]
 description: ${values.description}
 ${values.hasCommands ? `
 commands:
-  hello:
-    description: A simple hello command
-    usage: /hello` : ''}
-${values.hasPermissions ? `
-permissions:
-  ${values.name.toLowerCase()}.use:
-    description: Allows use of the plugin
-    default: true` : ''}
+  ${values.name.toLowerCase()}:
+    description: Main plugin command
+    usage: /${values.name.toLowerCase()} <args>` : ''}
 `;
+
+  const getFileLanguage = (path: string): string => {
+    if (path.endsWith('.java')) return 'java';
+    if (path.endsWith('.yml') || path.endsWith('.yaml')) return 'yaml';
+    if (path.endsWith('.xml')) return 'xml';
+    if (path.endsWith('.gradle')) return 'gradle';
+    return 'text';
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/20">
@@ -162,20 +270,19 @@ permissions:
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay" />
       </div>
 
-      <div className="relative z-10 container mx-auto px-4 py-8 md:py-12 max-w-6xl">
+      <div className="relative z-10 container mx-auto px-4 py-8 md:py-12 max-w-7xl">
         {/* Header */}
-        <header className="mb-12 text-center md:text-left md:flex md:justify-between md:items-end">
-          <div className="space-y-4">
+        <header className="mb-8 text-center md:text-left md:flex md:justify-between md:items-end">
+          <div className="space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary/50 border border-white/5 backdrop-blur-sm">
               <Sparkles className="w-3.5 h-3.5 text-accent" />
               <span className="text-xs font-medium tracking-wide uppercase text-muted-foreground">v2.0.0 Beta</span>
             </div>
-            <h1 className="text-4xl md:text-6xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
+            <h1 className="text-4xl md:text-5xl font-bold tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/50">
               SpigotForge <span className="text-primary">AI</span>
             </h1>
-            <p className="text-lg text-muted-foreground max-w-lg">
-              Generate production-ready Spigot plugins in seconds using advanced AI models. 
-              Describe your mechanics, and let us handle the NMS.
+            <p className="text-base text-muted-foreground max-w-lg">
+              Generate production-ready Spigot plugins with AI. Full project structure included.
             </p>
           </div>
           
@@ -195,32 +302,29 @@ permissions:
         </header>
 
         {/* Main Interface */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           {/* Left Panel: Wizard */}
-          <div className="lg:col-span-5 space-y-6">
+          <div className="lg:col-span-4 space-y-4">
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(generatePlugin)} className="space-y-8">
+              <form onSubmit={form.handleSubmit(generatePlugin)} className="space-y-4">
                 <Card className="border-border/50 bg-card/50 backdrop-blur-xl shadow-2xl shadow-black/20">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-lg">
                       <Hammer className="w-5 h-5 text-primary" />
                       Plugin Configuration
                     </CardTitle>
-                    <CardDescription>
-                      Define the core metadata for your Spigot plugin.
-                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
                       <FormField
                         control={form.control}
                         name="name"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Plugin Name</FormLabel>
+                            <FormLabel className="text-xs">Plugin Name</FormLabel>
                             <FormControl>
-                              <Input placeholder="SuperSmash" {...field} className="bg-secondary/50 border-white/10 focus:border-primary/50 transition-colors" />
+                              <Input placeholder="SuperSmash" {...field} className="bg-secondary/50 border-white/10 h-9 text-sm" />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -232,10 +336,10 @@ permissions:
                         name="apiVersion"
                         render={({ field }) => (
                           <FormItem>
-                            <FormLabel>Spigot Version</FormLabel>
+                            <FormLabel className="text-xs">Spigot Version</FormLabel>
                             <Select onValueChange={field.onChange} defaultValue={field.value}>
                               <FormControl>
-                                <SelectTrigger className="bg-secondary/50 border-white/10">
+                                <SelectTrigger className="bg-secondary/50 border-white/10 h-9 text-sm">
                                   <SelectValue placeholder="Select version" />
                                 </SelectTrigger>
                               </FormControl>
@@ -256,11 +360,11 @@ permissions:
                       name="mainClass"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Main Class Package</FormLabel>
+                          <FormLabel className="text-xs">Main Class Package</FormLabel>
                           <FormControl>
                             <div className="relative">
-                              <Box className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                              <Input placeholder="com.studio.plugin.Main" {...field} className="pl-9 bg-secondary/50 border-white/10 font-mono text-xs" />
+                              <Box className="absolute left-3 top-2 h-4 w-4 text-muted-foreground" />
+                              <Input placeholder="com.studio.plugin.Main" {...field} className="pl-9 bg-secondary/50 border-white/10 font-mono text-xs h-9" />
                             </div>
                           </FormControl>
                           <FormMessage />
@@ -268,69 +372,126 @@ permissions:
                       )}
                     />
 
-                    <div className="space-y-3">
-                      <Label className="text-base font-semibold">Modules & Features</Label>
-                      <div className="grid grid-cols-1 gap-3">
-                        <FormField
-                          control={form.control}
-                          name="hasCommands"
-                          render={({ field }) => (
-                            <FormItem className="flex flex-row items-center justify-between rounded-lg border border-white/5 bg-secondary/30 p-3">
-                              <div className="space-y-0.5">
-                                <div className="flex items-center gap-2">
-                                  <Terminal className="w-4 h-4 text-accent" />
-                                  <FormLabel className="text-base">Commands</FormLabel>
-                                </div>
-                                <FormDescription className="text-xs">
-                                  Enable CommandExecutor implementation
-                                </FormDescription>
-                              </div>
-                              <FormControl>
-                                <Switch
-                                  checked={field.value}
-                                  onCheckedChange={field.onChange}
-                                />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                        
-                        <FormField
-                          control={form.control}
-                          name="hasEvents"
-                          render={({ field }) => (
-                            <FormItem className="flex flex-row items-center justify-between rounded-lg border border-white/5 bg-secondary/30 p-3">
-                              <div className="space-y-0.5">
-                                <div className="flex items-center gap-2">
-                                  <Zap className="w-4 h-4 text-yellow-400" />
-                                  <FormLabel className="text-base">Events</FormLabel>
-                                </div>
-                                <FormDescription className="text-xs">
-                                  Register Listener interface
-                                </FormDescription>
-                              </div>
-                              <FormControl>
-                                <Switch
-                                  checked={field.value}
-                                  onCheckedChange={field.onChange}
-                                />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-                      </div>
+                    <FormField
+                      control={form.control}
+                      name="buildTool"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs">Build Tool</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger className="bg-secondary/50 border-white/10 h-9 text-sm">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="maven">Maven (pom.xml)</SelectItem>
+                              <SelectItem value="gradle">Gradle (build.gradle)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <FormField
+                        control={form.control}
+                        name="hasCommands"
+                        render={({ field }) => (
+                          <FormItem className="flex items-center gap-2 rounded-lg border border-white/5 bg-secondary/30 p-2">
+                            <FormControl>
+                              <Switch checked={field.value} onCheckedChange={field.onChange} />
+                            </FormControl>
+                            <FormLabel className="text-xs !mt-0">Commands</FormLabel>
+                          </FormItem>
+                        )}
+                      />
+                      
+                      <FormField
+                        control={form.control}
+                        name="hasEvents"
+                        render={({ field }) => (
+                          <FormItem className="flex items-center gap-2 rounded-lg border border-white/5 bg-secondary/30 p-2">
+                            <FormControl>
+                              <Switch checked={field.value} onCheckedChange={field.onChange} />
+                            </FormControl>
+                            <FormLabel className="text-xs !mt-0">Events</FormLabel>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="hasConfig"
+                        render={({ field }) => (
+                          <FormItem className="flex items-center gap-2 rounded-lg border border-white/5 bg-secondary/30 p-2">
+                            <FormControl>
+                              <Switch checked={field.value} onCheckedChange={field.onChange} />
+                            </FormControl>
+                            <FormLabel className="text-xs !mt-0">Config</FormLabel>
+                          </FormItem>
+                        )}
+                      />
                     </div>
                   </CardContent>
                 </Card>
 
+                {/* Libraries Card */}
+                <Card className="border-border/50 bg-card/50 backdrop-blur-xl">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Package className="w-5 h-5 text-accent" />
+                      Libraries & Dependencies
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <FormField
+                      control={form.control}
+                      name="libraries"
+                      render={() => (
+                        <FormItem>
+                          <div className="grid grid-cols-2 gap-2">
+                            {libraries.map((lib) => (
+                              <FormField
+                                key={lib.id}
+                                control={form.control}
+                                name="libraries"
+                                render={({ field }) => (
+                                  <FormItem className="flex items-center gap-2 p-2 rounded border border-white/5 bg-secondary/20">
+                                    <FormControl>
+                                      <Checkbox
+                                        checked={field.value?.includes(lib.id)}
+                                        onCheckedChange={(checked) => {
+                                          const newValue = checked
+                                            ? [...(field.value || []), lib.id]
+                                            : (field.value || []).filter((id) => id !== lib.id);
+                                          field.onChange(newValue);
+                                        }}
+                                      />
+                                    </FormControl>
+                                    <FormLabel className="text-xs font-normal cursor-pointer !mt-0">
+                                      {lib.name}
+                                    </FormLabel>
+                                  </FormItem>
+                                )}
+                              />
+                            ))}
+                          </div>
+                        </FormItem>
+                      )}
+                    />
+                  </CardContent>
+                </Card>
+
+                {/* AI Prompt Card */}
                 <Card className="border-primary/20 bg-primary/5 backdrop-blur-xl shadow-2xl shadow-primary/5">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-primary">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-primary text-lg">
                       <Cpu className="w-5 h-5" />
                       AI Assistant
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="space-y-4">
+                  <CardContent className="space-y-3">
                     <FormField
                       control={form.control}
                       name="aiPrompt"
@@ -338,8 +499,8 @@ permissions:
                         <FormItem>
                           <FormControl>
                             <Textarea 
-                              placeholder="Describe specific mechanics: e.g., 'Create a sword that strikes lightning when hitting a creeper'..." 
-                              className="min-h-[120px] bg-background/50 border-primary/20 focus:border-primary resize-none"
+                              placeholder="Describe your plugin: e.g., 'Create a /fly command that toggles flight mode and costs 100 coins using Vault economy'" 
+                              className="min-h-[100px] bg-background/50 border-primary/20 focus:border-primary resize-none text-sm"
                               {...field}
                             />
                           </FormControl>
@@ -348,13 +509,14 @@ permissions:
                     />
                     <Button 
                       type="submit" 
-                      className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 h-12 text-lg font-medium group"
+                      className="w-full bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 h-11 text-base font-medium group"
                       disabled={isGenerating}
+                      data-testid="button-generate"
                     >
                       {isGenerating ? (
                         <span className="flex items-center gap-2">
                           <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                          Forging...
+                          Generating...
                         </span>
                       ) : (
                         <span className="flex items-center gap-2">
@@ -369,60 +531,89 @@ permissions:
           </div>
 
           {/* Right Panel: Preview & Output */}
-          <div className="lg:col-span-7 space-y-6">
+          <div className="lg:col-span-8 space-y-4">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-3 bg-secondary/50 p-1">
-                <TabsTrigger value="builder">
-                  <Layers className="w-4 h-4 mr-2" /> Preview
-                </TabsTrigger>
-                <TabsTrigger value="code">
-                  <FileCode className="w-4 h-4 mr-2" /> Source
-                </TabsTrigger>
-                <TabsTrigger value="assets" disabled>
-                  <Box className="w-4 h-4 mr-2" /> Assets
-                </TabsTrigger>
-              </TabsList>
+              <div className="flex items-center justify-between mb-4">
+                <TabsList className="bg-secondary/50 p-1">
+                  <TabsTrigger value="builder">
+                    <Layers className="w-4 h-4 mr-2" /> Preview
+                  </TabsTrigger>
+                  <TabsTrigger value="code">
+                    <FileCode className="w-4 h-4 mr-2" /> Editor
+                  </TabsTrigger>
+                </TabsList>
+
+                {Object.keys(generatedFiles).length > 0 && (
+                  <Button 
+                    onClick={downloadPlugin} 
+                    disabled={isDownloading}
+                    className="bg-accent hover:bg-accent/90 text-accent-foreground"
+                    data-testid="button-download"
+                  >
+                    {isDownloading ? (
+                      <span className="flex items-center gap-2">
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Preparing...
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <FolderArchive className="w-4 h-4" />
+                        Download ZIP
+                      </span>
+                    )}
+                  </Button>
+                )}
+              </div>
               
-              <TabsContent value="builder" className="mt-4">
-                <div className="space-y-4">
-                  <Card className="bg-[#0d0d12] border-border">
-                    <CardHeader className="pb-2 border-b border-border bg-secondary/10">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-mono text-muted-foreground">src/main/resources/plugin.yml</CardTitle>
-                        <Badge variant="outline" className="font-mono text-xs border-primary/30 text-primary">YAML</Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <CodePreview code={yamlCode} language="yaml" />
-                    </CardContent>
-                  </Card>
-                </div>
+              <TabsContent value="builder" className="mt-0">
+                <Card className="bg-[#0d0d12] border-border">
+                  <CardHeader className="pb-2 border-b border-border bg-secondary/10">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-mono text-muted-foreground">src/main/resources/plugin.yml</CardTitle>
+                      <Badge variant="outline" className="font-mono text-xs border-primary/30 text-primary">YAML</Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <ScrollArea className="h-[400px] w-full p-4">
+                      <pre className="font-mono text-sm text-blue-100 leading-relaxed">
+                        <code>{yamlCode}</code>
+                      </pre>
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
               </TabsContent>
               
-              <TabsContent value="code" className="mt-4">
+              <TabsContent value="code" className="mt-0">
                 <AnimatePresence mode="wait">
-                  {generatedCode ? (
+                  {Object.keys(generatedFiles).length > 0 ? (
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -20 }}
+                      className="grid grid-cols-12 gap-4"
                     >
-                      <Card className="bg-[#0d0d12] border-border">
-                        <CardHeader className="pb-2 border-b border-border bg-secondary/10">
-                          <div className="flex items-center justify-between">
-                            <CardTitle className="text-sm font-mono text-muted-foreground">src/main/java/Main.java</CardTitle>
-                            <Badge variant="outline" className="font-mono text-xs border-yellow-500/30 text-yellow-500">JAVA</Badge>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="p-0">
-                          <CodePreview code={generatedCode} language="java" />
-                        </CardContent>
-                      </Card>
+                      <div className="col-span-3">
+                        <FileTree 
+                          files={generatedFiles} 
+                          activeFile={activeFile}
+                          onSelect={setActiveFile}
+                        />
+                      </div>
+                      <div className="col-span-9">
+                        {activeFile && generatedFiles[activeFile] && (
+                          <CodeEditor
+                            code={generatedFiles[activeFile]}
+                            onChange={(code) => handleFileChange(activeFile, code)}
+                            filename={activeFile.split('/').pop() || activeFile}
+                            language={getFileLanguage(activeFile)}
+                          />
+                        )}
+                      </div>
                     </motion.div>
                   ) : (
-                    <div className="h-[400px] flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-xl bg-white/5 text-muted-foreground">
+                    <div className="h-[450px] flex flex-col items-center justify-center border-2 border-dashed border-white/10 rounded-xl bg-white/5 text-muted-foreground">
                       <Code className="w-12 h-12 mb-4 opacity-20" />
-                      <p>Generate code to view source</p>
+                      <p>Generate a plugin to view and edit files</p>
                     </div>
                   )}
                 </AnimatePresence>
@@ -430,20 +621,27 @@ permissions:
             </Tabs>
 
             {/* Feature Highlights */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="p-4 rounded-xl bg-card border border-border/50 hover:border-primary/30 transition-colors">
                 <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3 text-primary">
                   <Zap className="w-5 h-5" />
                 </div>
-                <h3 className="font-bold text-lg mb-1">Instant Boilerplate</h3>
-                <p className="text-sm text-muted-foreground">Skip the 20 minutes of setup. get a compiling `plugin.yml` and Main class instantly.</p>
+                <h3 className="font-bold mb-1">Full Project</h3>
+                <p className="text-xs text-muted-foreground">Complete Maven/Gradle setup with all dependencies configured.</p>
               </div>
               <div className="p-4 rounded-xl bg-card border border-border/50 hover:border-accent/30 transition-colors">
                 <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center mb-3 text-accent">
                   <Cpu className="w-5 h-5" />
                 </div>
-                <h3 className="font-bold text-lg mb-1">AI-Powered Logic</h3>
-                <p className="text-sm text-muted-foreground">Describe mechanics in plain English and let our fine-tuned models write the Spigot API calls.</p>
+                <h3 className="font-bold mb-1">AI-Powered</h3>
+                <p className="text-xs text-muted-foreground">Describe any feature and watch real code get generated.</p>
+              </div>
+              <div className="p-4 rounded-xl bg-card border border-border/50 hover:border-yellow-500/30 transition-colors">
+                <div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center mb-3 text-yellow-500">
+                  <Package className="w-5 h-5" />
+                </div>
+                <h3 className="font-bold mb-1">Library Support</h3>
+                <p className="text-xs text-muted-foreground">JDA, Vault, PlaceholderAPI, and more pre-configured.</p>
               </div>
             </div>
           </div>
