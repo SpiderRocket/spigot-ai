@@ -114,11 +114,48 @@ export default function Home() {
     
     // Simulate AI generation delay
     setTimeout(() => {
+      // Basic "AI" logic simulation
+      let aiLogic = "// Add your logic here";
+      if (data.aiPrompt) {
+        const prompt = data.aiPrompt.toLowerCase();
+        if (prompt.includes("command") || prompt.includes("/welcome")) {
+            aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
+        // Command implementation
+        if (label.equalsIgnoreCase("welcome")) {
+            if (sender instanceof Player) {
+                Player player = (Player) sender;
+                player.sendMessage(ChatColor.GREEN + "Welcome, " + player.getName() + "!");
+            } else {
+                sender.sendMessage("This command is only for players!");
+            }
+            return true;
+        }`;
+        } else if (prompt.includes("sword") || prompt.includes("lightning")) {
+            aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
+        @EventHandler
+        public void onEntityDamage(EntityDamageByEntityEvent event) {
+            if (event.getDamager() instanceof Player) {
+                Player player = (Player) event.getDamager();
+                if (player.getInventory().getItemInMainHand().getType() == Material.DIAMOND_SWORD) {
+                    event.getEntity().getWorld().strikeLightning(event.getEntity().getLocation());
+                }
+            }
+        }`;
+        } else {
+             aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
+        // NOTE: This is a simulation. In a real app, this would call an LLM API.
+        getLogger().info("AI Logic placeholder for: " + "${data.aiPrompt}");`;
+        }
+      }
+
       const javaCode = `package ${data.mainClass.substring(0, data.mainClass.lastIndexOf('.'))};
 
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.ChatColor;
+import org.bukkit.Material;
+import org.bukkit.entity.Player;
 ${data.hasCommands ? 'import org.bukkit.command.Command;\nimport org.bukkit.command.CommandSender;' : ''}
-${data.hasEvents ? 'import org.bukkit.event.Listener;' : ''}
+${data.hasEvents ? 'import org.bukkit.event.Listener;\nimport org.bukkit.event.EventHandler;\nimport org.bukkit.event.entity.EntityDamageByEntityEvent;' : ''}
 
 public final class ${data.mainClass.split('.').pop()} extends JavaPlugin${data.hasEvents ? ' implements Listener' : ''} {
 
@@ -129,8 +166,6 @@ public final class ${data.mainClass.split('.').pop()} extends JavaPlugin${data.h
         
         ${data.hasConfig ? 'saveDefaultConfig();' : ''}
         ${data.hasEvents ? 'getServer().getPluginManager().registerEvents(this, this);' : ''}
-        
-        ${data.aiPrompt ? `// AI Generated Logic for: "${data.aiPrompt}"\n        // Implementation would go here...` : '// Add your logic here'}
     }
 
     @Override
@@ -146,8 +181,13 @@ public final class ${data.mainClass.split('.').pop()} extends JavaPlugin${data.h
             sender.sendMessage("Hello from ${data.name}!");
             return true;
         }
+        
+${aiLogic.includes("Command implementation") ? aiLogic : ''}
+        
         return false;
     }` : ''}
+
+${!aiLogic.includes("Command implementation") && data.aiPrompt ? aiLogic : ''}
 }
 `;
       setGeneratedCode(javaCode);
