@@ -118,7 +118,25 @@ export default function Home() {
       let aiLogic = "// Add your logic here";
       if (data.aiPrompt) {
         const prompt = data.aiPrompt.toLowerCase();
-        if (prompt.includes("command") || prompt.includes("/welcome")) {
+        if (prompt.includes("command") && prompt.includes("color")) {
+             aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
+        if (label.equalsIgnoreCase("color")) {
+            if (args.length == 0) {
+                sender.sendMessage(ChatColor.RED + "Usage: /color <hexcode>");
+                return true;
+            }
+            
+            if (sender instanceof Player) {
+                Player player = (Player) sender;
+                String hex = args[0];
+                // Basic hex validation logic would go here
+                player.setDisplayName(net.md_5.bungee.api.ChatColor.of(hex) + player.getName() + ChatColor.RESET);
+                player.setPlayerListName(net.md_5.bungee.api.ChatColor.of(hex) + player.getName() + ChatColor.RESET);
+                player.sendMessage(ChatColor.GREEN + "Your name color has been updated!");
+            }
+            return true;
+        }`;
+        } else if (prompt.includes("command") || prompt.includes("/welcome")) {
             aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
         // Command implementation
         if (label.equalsIgnoreCase("welcome")) {
