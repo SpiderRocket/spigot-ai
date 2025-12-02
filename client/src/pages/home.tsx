@@ -112,105 +112,27 @@ export default function Home() {
     setIsGenerating(true);
     setActiveTab("code");
     
-    // Simulate AI generation delay
-    setTimeout(() => {
-      // Basic "AI" logic simulation
-      let aiLogic = "// Add your logic here";
-      if (data.aiPrompt) {
-        const prompt = data.aiPrompt.toLowerCase();
-        if (prompt.includes("command") && prompt.includes("color")) {
-             aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
-        if (label.equalsIgnoreCase("color")) {
-            if (args.length == 0) {
-                sender.sendMessage(ChatColor.RED + "Usage: /color <hexcode>");
-                return true;
-            }
-            
-            if (sender instanceof Player) {
-                Player player = (Player) sender;
-                String hex = args[0];
-                // Basic hex validation logic would go here
-                player.setDisplayName(net.md_5.bungee.api.ChatColor.of(hex) + player.getName() + ChatColor.RESET);
-                player.setPlayerListName(net.md_5.bungee.api.ChatColor.of(hex) + player.getName() + ChatColor.RESET);
-                player.sendMessage(ChatColor.GREEN + "Your name color has been updated!");
-            }
-            return true;
-        }`;
-        } else if (prompt.includes("command") || prompt.includes("/welcome")) {
-            aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
-        // Command implementation
-        if (label.equalsIgnoreCase("welcome")) {
-            if (sender instanceof Player) {
-                Player player = (Player) sender;
-                player.sendMessage(ChatColor.GREEN + "Welcome, " + player.getName() + "!");
-            } else {
-                sender.sendMessage("This command is only for players!");
-            }
-            return true;
-        }`;
-        } else if (prompt.includes("sword") || prompt.includes("lightning")) {
-            aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
-        @EventHandler
-        public void onEntityDamage(EntityDamageByEntityEvent event) {
-            if (event.getDamager() instanceof Player) {
-                Player player = (Player) event.getDamager();
-                if (player.getInventory().getItemInMainHand().getType() == Material.DIAMOND_SWORD) {
-                    event.getEntity().getWorld().strikeLightning(event.getEntity().getLocation());
-                }
-            }
-        }`;
-        } else {
-             aiLogic = `        // AI Generated Logic for: "${data.aiPrompt}"
-        // NOTE: This is a simulation. In a real app, this would call an LLM API.
-        getLogger().info("AI Logic placeholder for: " + "${data.aiPrompt}");`;
-        }
+    try {
+      const response = await fetch("/api/generate-plugin", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to generate plugin");
       }
 
-      const javaCode = `package ${data.mainClass.substring(0, data.mainClass.lastIndexOf('.'))};
-
-import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.ChatColor;
-import org.bukkit.Material;
-import org.bukkit.entity.Player;
-${data.hasCommands ? 'import org.bukkit.command.Command;\nimport org.bukkit.command.CommandSender;' : ''}
-${data.hasEvents ? 'import org.bukkit.event.Listener;\nimport org.bukkit.event.EventHandler;\nimport org.bukkit.event.entity.EntityDamageByEntityEvent;' : ''}
-
-public final class ${data.mainClass.split('.').pop()} extends JavaPlugin${data.hasEvents ? ' implements Listener' : ''} {
-
-    @Override
-    public void onEnable() {
-        // Plugin startup logic
-        getLogger().info("${data.name} has been enabled!");
-        
-        ${data.hasConfig ? 'saveDefaultConfig();' : ''}
-        ${data.hasEvents ? 'getServer().getPluginManager().registerEvents(this, this);' : ''}
-    }
-
-    @Override
-    public void onDisable() {
-        // Plugin shutdown logic
-        getLogger().info("${data.name} has been disabled!");
-    }
-    
-    ${data.hasCommands ? `
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (command.getName().equalsIgnoreCase("hello")) {
-            sender.sendMessage("Hello from ${data.name}!");
-            return true;
-        }
-        
-${aiLogic.includes("Command implementation") ? aiLogic : ''}
-        
-        return false;
-    }` : ''}
-
-${!aiLogic.includes("Command implementation") && data.aiPrompt ? aiLogic : ''}
-}
-`;
-      setGeneratedCode(javaCode);
+      const result = await response.json();
+      setGeneratedCode(result.code);
+    } catch (error) {
+      console.error("Generation error:", error);
+      setGeneratedCode(`// Error generating plugin: ${error instanceof Error ? error.message : 'Unknown error'}\n// Please check your OpenAI API key and try again.`);
+    } finally {
       setIsGenerating(false);
-    }, 1500);
+    }
   };
 
   const yamlCode = `name: ${values.name}
