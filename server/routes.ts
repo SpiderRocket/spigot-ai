@@ -4,8 +4,12 @@ import { storage } from "./storage";
 import { z } from "zod";
 import OpenAI from "openai";
 
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Using Cerebras API with OpenAI-compatible SDK
+// Cerebras provides ultra-fast inference on their Wafer-Scale Engine
+const cerebras = new OpenAI({ 
+  apiKey: process.env.CEREBRAS_API_KEY,
+  baseURL: "https://api.cerebras.ai/v1"
+});
 
 const generatePluginSchema = z.object({
   name: z.string(),
@@ -39,7 +43,8 @@ Rules:
 4. Add helpful comments
 5. Handle edge cases (null checks, player-only commands, etc.)
 6. Use modern Spigot APIs for the specified version
-7. Return ONLY the Java code, no markdown or explanation`;
+7. Return ONLY the Java code, no markdown or explanation
+8. Do not wrap code in markdown code blocks`;
 
       const userPrompt = `Generate a Spigot plugin with these specifications:
 
@@ -59,16 +64,20 @@ ${data.aiPrompt ? `Special Requirements:\n${data.aiPrompt}` : 'Create a basic pl
 
 Generate the complete Main.java class code. If commands are enabled, implement the onCommand method with the logic for the special requirements. If events are enabled, implement any necessary @EventHandler methods.`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5",
+      const response = await cerebras.chat.completions.create({
+        model: "llama-3.3-70b",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt }
         ],
-        max_completion_tokens: 4096,
+        temperature: 0.7,
+        max_tokens: 4096,
       });
 
-      const generatedCode = response.choices[0].message.content || "// Error: No code generated";
+      let generatedCode = response.choices[0].message.content || "// Error: No code generated";
+      
+      // Clean up any markdown code blocks if they slip through
+      generatedCode = generatedCode.replace(/^```java\n?/gm, '').replace(/^```\n?/gm, '').trim();
       
       res.json({ code: generatedCode });
     } catch (error) {
