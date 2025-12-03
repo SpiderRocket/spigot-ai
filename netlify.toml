@@ -1,0 +1,14 @@
+[build]
+  publish = "dist/public"
+  command = "npm run build"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Redirect all non-file requests to index.html for client-side routing
+# Netlify Functions with custom paths take precedence automatically
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
