@@ -53,9 +53,8 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 
-// --- Mock Data ---
 const SPIGOT_VERSIONS = [
-  "1.20.4", "1.20.1", "1.19.4", "1.18.2", "1.17.1", "1.16.5", "1.12.2", "1.8.8"
+  "1.21.1","1.20.4", "1.20.1", "1.19.4", "1.18.2", "1.17.1", "1.16.5", "1.12.2", "1.8.8"
 ];
 
 interface Library {
